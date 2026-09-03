@@ -32,8 +32,43 @@ def _read_export(path: Path) -> pd.DataFrame:
     if suffix == ".csv":
         return pd.read_csv(path, dtype=str)
     if suffix in {".xlsx", ".xls"}:
-        return pd.read_excel(path, dtype=str)
+        return _read_excel_export(path)
     raise ValueError(f"Format non supporté : {path}")
+
+
+def _detect_header_row(preview: pd.DataFrame) -> int:
+    markers = {
+        _normalize_column_name(name)
+        for name in (
+            *SOFTY_REFERENCE_CANDIDATES,
+            *INDEED_REFERENCE_CANDIDATES,
+            "Nom de l'offre",
+            "Job Title",
+        )
+    }
+
+    for row_idx in range(min(15, len(preview))):
+        row = preview.iloc[row_idx]
+        normalized_cells = [
+            _normalize_column_name(value)
+            for value in row
+            if value is not None and not (isinstance(value, float) and pd.isna(value)) and str(value).strip()
+        ]
+        if any(cell in markers for cell in normalized_cells):
+            return row_idx
+
+    return 0
+
+
+def _read_excel_export(path: Path) -> pd.DataFrame:
+    preview = pd.read_excel(path, header=None, dtype=str, nrows=15)
+    header_row = _detect_header_row(preview)
+    frame = pd.read_excel(path, header=header_row, dtype=str)
+
+    if all(str(column).startswith("Unnamed:") for column in frame.columns):
+        raise ValueError(f"Impossible de détecter l'en-tête Excel dans {path.name}")
+
+    return frame
 
 
 def _normalize_column_name(name: str) -> str:
@@ -43,11 +78,22 @@ def _normalize_column_name(name: str) -> str:
     return text
 
 
-def _normalize_reference(value: object) -> str | None:
+def _normalize_reference(value: object, *, source_label: str | None = None) -> str | None:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return None
     text = str(value).strip()
-    return text or None
+    if not text:
+        return None
+
+    if source_label == "Indeed":
+        match = re.fullmatch(r"unique(\d+)_\d+", text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+    if re.fullmatch(r"\d+\.0", text):
+        return text[:-2]
+
+    return text
 
 
 def list_export_columns(path: Path) -> list[str]:
@@ -123,7 +169,7 @@ def load_references(
             )
 
         for raw in frame[resolved_column].tolist():
-            normalized = _normalize_reference(raw)
+            normalized = _normalize_reference(raw, source_label=source_label)
             if normalized is not None:
                 references.add(normalized)
 

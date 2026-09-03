@@ -10,6 +10,12 @@ from src.config import INDEED_ENTITIES, Settings
 
 logger = logging.getLogger(__name__)
 
+INDEED_EMPLOYER_HOST = "employers.indeed.com"
+INDEED_CAMPAIGN_URL = "https://employers.indeed.com/objective-campaign/create/job-selection"
+JOB_SOURCE_LABELS = ("Source d'emploi", "Job source", "Source")
+EXPORT_BUTTON_LABELS = ("Exporter", "Export")
+ALL_JOBS_LABELS = ("Tous les emplois", "All jobs")
+
 
 class IndeedAutomation:
     """
@@ -38,22 +44,63 @@ class IndeedAutomation:
 
         self.page.wait_for_load_state("networkidle")
 
-    def _open_campaign_creation(self) -> None:
-        self.page.get_by_role("link", name="Campagnes", exact=False).click()
-        self.page.get_by_role("button", name="Créer une campagne", exact=False).click()
+    def _employer_portal_url(self) -> str:
+        login_url = self.settings.indeed_login_url
+        if INDEED_EMPLOYER_HOST in login_url:
+            return login_url
+        return INDEED_CAMPAIGN_URL
+
+    def _ensure_employer_portal(self) -> None:
+        if INDEED_EMPLOYER_HOST in self.page.url:
+            return
+
+        target = self._employer_portal_url()
+        logger.info("Navigation vers le portail employeur Indeed : %s", target)
+        self.page.goto(target, wait_until="domcontentloaded")
         self.page.wait_for_load_state("networkidle")
 
+    def _open_campaign_creation(self) -> None:
+        self._ensure_employer_portal()
+
+        if "objective-campaign" not in self.page.url:
+            logger.info("Ouverture de la création de campagne Indeed…")
+            self.page.goto(INDEED_CAMPAIGN_URL, wait_until="domcontentloaded")
+            self.page.wait_for_load_state("networkidle")
+
+    def _click_first_matching_role(self, role: str, labels: tuple[str, ...]) -> None:
+        for label in labels:
+            locator = self.page.get_by_role(role, name=label, exact=False)
+            if locator.count() > 0:
+                locator.first.click()
+                return
+        raise RuntimeError(f"Aucun élément {role!r} trouvé parmi {labels!r}")
+
+    def _job_source_combobox(self):
+        for label in JOB_SOURCE_LABELS:
+            locator = self.page.get_by_role("combobox", name=label, exact=False)
+            if locator.count() > 0:
+                return locator.first
+        raise RuntimeError(f"Aucun combobox trouvé parmi {JOB_SOURCE_LABELS!r}")
+
     def _select_job_source(self, entity_name: str) -> None:
-        source_field = self.page.get_by_label("Source d'emploi", exact=False)
-        source_field.click()
-        self.page.get_by_role("option", name=entity_name, exact=True).click()
+        combo = self._job_source_combobox()
+        current_value = combo.inner_text()
+        if entity_name.upper() in current_value.upper():
+            logger.info("Source d'emploi déjà sur %s", entity_name)
+            return
+
+        combo.click()
+        option = self.page.get_by_role("option", name=entity_name, exact=False)
+        option.first.wait_for(state="visible", timeout=10_000)
+        option.first.click()
+        self.page.wait_for_load_state("networkidle")
 
     def _export_all_jobs(self, entity_name: str) -> Path:
         logger.info("Export Indeed pour l'entité : %s", entity_name)
 
         def trigger_export() -> None:
-            self.page.get_by_role("button", name="Exporter", exact=False).click()
-            self.page.get_by_role("menuitem", name="Tous les emplois", exact=False).click()
+            self._click_first_matching_role("button", EXPORT_BUTTON_LABELS)
+            self._click_first_matching_role("button", ALL_JOBS_LABELS)
 
         download_path = wait_for_download(self.page, self.settings.download_dir, trigger_export)
         renamed = self.settings.download_dir / f"indeed_{self._slug(entity_name)}{download_path.suffix}"

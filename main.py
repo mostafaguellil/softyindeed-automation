@@ -2,10 +2,18 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
-from src.browser import launch_browser, save_debug_screenshot
+from src.browser import (
+    DEFAULT_CDP_URL,
+    connect_browser_cdp,
+    launch_browser,
+    print_cdp_instructions,
+    resolve_attach_pages,
+    save_debug_screenshot,
+)
 from src.compare import compare_exports, format_report, list_export_columns
 from src.config import Settings
 from src.env_check import validate_env
@@ -54,6 +62,29 @@ def parse_args() -> argparse.Namespace:
         metavar="FILE",
         help="Affiche les colonnes d'un export déjà généré.",
     )
+    parser.add_argument(
+        "--cdp",
+        action="store_true",
+        help=(
+            "Se connecter à un Chrome déjà ouvert (2FA manuelle). "
+            "Équivalent à CDP_URL dans .env."
+        ),
+    )
+    parser.add_argument(
+        "--cdp-url",
+        default=None,
+        help=f"URL CDP Chrome (défaut : {DEFAULT_CDP_URL}).",
+    )
+    parser.add_argument(
+        "--indeed-url",
+        default=None,
+        help="Fragment d'URL pour sélectionner l'onglet Indeed (évite le prompt).",
+    )
+    parser.add_argument(
+        "--softy-url",
+        default=None,
+        help="Fragment d'URL pour sélectionner l'onglet Softy (évite le prompt).",
+    )
     return parser.parse_args()
 
 
@@ -69,7 +100,45 @@ def _print_columns(path: Path) -> int:
     return 0
 
 
+def _resolve_cdp_url(args: argparse.Namespace) -> str | None:
+    if args.cdp:
+        return args.cdp_url or DEFAULT_CDP_URL
+    if args.cdp_url:
+        return args.cdp_url
+    return None
+
+
 def _generate_exports(settings: Settings) -> tuple[list[Path], list[Path]]:
+    if settings.uses_cdp_attach:
+        print_cdp_instructions(settings.cdp_url or DEFAULT_CDP_URL)
+        print("Attente des onglets Indeed et Softy dans Chrome…")
+
+        with connect_browser_cdp(settings.cdp_url or DEFAULT_CDP_URL) as (_, _, context):
+            indeed_page, softy_page = resolve_attach_pages(
+                context,
+                indeed_url_hint=settings.indeed_attach_url,
+                softy_url_hint=settings.softy_attach_url,
+                softy_login_url=settings.softy_login_url,
+                indeed_login_url=settings.indeed_login_url,
+            )
+            try:
+                generated = generate_all_exports(
+                    context,
+                    settings,
+                    softy_page=softy_page,
+                    indeed_page=indeed_page,
+                    skip_login=True,
+                )
+                print_generated_files(generated)
+                return generated.softy_files, generated.indeed_files
+            except Exception:
+                for page in (indeed_page, softy_page):
+                    if page is not None:
+                        screenshot = save_debug_screenshot(page, settings.download_dir, "erreur")
+                        logger.error("Capture d'écran de debug : %s", screenshot)
+                        break
+                raise
+
     with launch_browser(settings) as (_, _, context):
         try:
             generated = generate_all_exports(context, settings)
@@ -89,8 +158,12 @@ def main() -> int:
     if args.list_columns:
         return _print_columns(args.list_columns)
 
-    validate_env()
-    settings = Settings.from_env()
+    validate_env(cdp_url=_resolve_cdp_url(args) or os.getenv("CDP_URL"))
+    settings = Settings.from_env(
+        cdp_url=_resolve_cdp_url(args),
+        indeed_attach_url=args.indeed_url,
+        softy_attach_url=args.softy_url,
+    )
 
     softy_files: list[Path] = []
     indeed_files: list[Path] = []

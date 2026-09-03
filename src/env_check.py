@@ -31,17 +31,22 @@ def ensure_env_file() -> Path:
     sys.exit(1)
 
 
-def validate_env() -> None:
+def validate_env(*, cdp_url: str | None = None) -> None:
     load_dotenv()
     ensure_env_file()
 
-    required = [
-        "INDEED_EMAIL",
-        "INDEED_PASSWORD",
-        "SOFTY_EMAIL",
-        "SOFTY_PASSWORD",
-        "SOFTY_LOGIN_URL",
-    ]
+    uses_cdp = bool(cdp_url or os.getenv("CDP_URL"))
+
+    if uses_cdp:
+        required = ["SOFTY_LOGIN_URL"]
+    else:
+        required = [
+            "INDEED_EMAIL",
+            "INDEED_PASSWORD",
+            "SOFTY_EMAIL",
+            "SOFTY_PASSWORD",
+            "SOFTY_LOGIN_URL",
+        ]
 
     missing = [key for key in required if not os.getenv(key)]
     if missing:
