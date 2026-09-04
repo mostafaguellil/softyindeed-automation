@@ -1,10 +1,7 @@
 @echo off
-REM ============================================================
-REM  SOFTY / INDEED — Lanceur Windows
-REM  Double-cliquez CE fichier (pas "run" Shell Script).
-REM ============================================================
 setlocal EnableExtensions EnableDelayedExpansion
-chcp 65001 >nul 2>&1
+
+REM ASCII-only batch file (accents break Windows CMD when UTF-8)
 
 cd /d "%~dp0"
 
@@ -16,14 +13,15 @@ echo.
 echo  ============================================================
 echo.
 echo           SOFTY  /  INDEED
-echo           Automatisation des exports + comparaison
+echo           Exports + comparaison automatique
 echo.
 echo  ============================================================
 echo.
-echo  IMPORTANT : utilisez ce fichier .bat ^(Windows Batch File^).
-echo  Ne pas ouvrir "run" de type Shell Script ^(c'est pour Mac^).
+echo  Lanceur Windows : LANCER.bat
+echo  (ne pas ouvrir run.sh - reserve a Mac/Linux)
 echo.
 
+set "EXIT_CODE=0"
 set "CDP_PORT=9222"
 set "CDP_URL=http://localhost:9222"
 set "CDP_WAIT_SECONDS=25"
@@ -35,96 +33,124 @@ set "BATCH_UI=1"
 set "INDEED_HOME=https://employers.indeed.com/jobs"
 set "SOFTY_HOME=https://v2.softy.pro/stats"
 set "PYTHON_CMD="
-set "EXIT_CODE=0"
-
 set "CHROME_APP="
-if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" set "CHROME_APP=%ProgramFiles%\Google\Chrome\Application\chrome.exe"
-if "%CHROME_APP%"=="" if exist "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" set "CHROME_APP=%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"
-if "%CHROME_APP%"=="" if exist "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe" set "CHROME_APP=%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"
+
+if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" (
+  set "CHROME_APP=%ProgramFiles%\Google\Chrome\Application\chrome.exe"
+)
+if not defined CHROME_APP if exist "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" (
+  set "CHROME_APP=%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"
+)
+if not defined CHROME_APP if exist "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe" (
+  set "CHROME_APP=%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"
+)
 
 echo  [.] Recherche de Python...
-py -3 --version >nul 2>&1
-if not errorlevel 1 (
-  set "PYTHON_CMD=py -3"
-) else (
-  python --version >nul 2>&1
-  if not errorlevel 1 (
-    set "PYTHON_CMD=python"
+
+where py >nul 2>&1
+if %ERRORLEVEL%==0 (
+  py -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
+  if !ERRORLEVEL!==0 (
+    set "PYTHON_CMD=py -3"
   )
 )
 
-if "%PYTHON_CMD%"=="" (
+if not defined PYTHON_CMD (
+  where python >nul 2>&1
+  if !ERRORLEVEL!==0 (
+    python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
+    if !ERRORLEVEL!==0 (
+      set "PYTHON_CMD=python"
+    )
+  )
+)
+
+if not defined PYTHON_CMD (
   color 0C
   echo.
-  echo  [ERREUR] Python introuvable.
+  echo  [ERREUR] Python 3.10+ introuvable dans le PATH.
   echo.
-  echo  Installez Python 3.11+ depuis https://www.python.org/downloads/
-  echo  Cochez bien "Add python.exe to PATH" pendant l'installation.
+  echo  Python peut etre installe sans etre dans le PATH.
+  echo  Solutions :
+  echo    1. Reinstallez Python depuis https://www.python.org/downloads/
+  echo    2. Cochez "Add python.exe to PATH"
+  echo    3. Rouvrez cette fenetre puis relancez LANCER.bat
+  echo.
+  echo  Test manuel : ouvrez cmd et tapez :  py -3 --version
   echo.
   set "EXIT_CODE=1"
-  goto :end_pause
+  goto END_PAUSE
 )
-echo  [OK] Python trouve : %PYTHON_CMD%
-%PYTHON_CMD% --version
+
+echo  [OK] Python trouve
+call %PYTHON_CMD% --version
+if errorlevel 1 (
+  color 0C
+  echo  [ERREUR] Python ne demarre pas correctement.
+  set "EXIT_CODE=1"
+  goto END_PAUSE
+)
 
 echo  [.] Preparation de l'environnement Windows...
-if exist ".venv\Scripts\python.exe" goto :venv_ok
 
-REM .venv absent ou copie depuis Mac (pas de Scripts\) -> a recreer
+if exist ".venv\Scripts\python.exe" goto VENV_OK
+
 if exist ".venv" (
-  echo  [!] Ancien .venv incompatible detecte ^(souvent copie depuis Mac^).
+  echo  [!] Ancien .venv incompatible ^(souvent copie depuis Mac^).
   echo      Recreation d'un .venv Windows...
   rmdir /s /q ".venv" 2>nul
 )
 
-%PYTHON_CMD% -m venv .venv
+call %PYTHON_CMD% -m venv .venv
 if errorlevel 1 (
   color 0C
   echo  [ERREUR] Impossible de creer .venv
   set "EXIT_CODE=1"
-  goto :end_pause
+  goto END_PAUSE
 )
 
-:venv_ok
-if not exist ".venv\Scripts\activate.bat" (
+:VENV_OK
+if not exist ".venv\Scripts\python.exe" (
   color 0C
-  echo  [ERREUR] .venv\Scripts\activate.bat introuvable.
+  echo  [ERREUR] .venv\Scripts\python.exe introuvable.
   set "EXIT_CODE=1"
-  goto :end_pause
+  goto END_PAUSE
 )
 
-call ".venv\Scripts\activate.bat"
-if errorlevel 1 (
-  color 0C
-  echo  [ERREUR] Activation .venv impossible
-  set "EXIT_CODE=1"
-  goto :end_pause
-)
+set "VENV_PY=%~dp0.venv\Scripts\python.exe"
+set "VENV_PIP=%~dp0.venv\Scripts\pip.exe"
 
 if not exist "requirements.txt" (
   color 0C
-  echo  [ERREUR] requirements.txt introuvable dans ce dossier.
+  echo  [ERREUR] requirements.txt introuvable dans :
+  echo           %CD%
   set "EXIT_CODE=1"
-  goto :end_pause
+  goto END_PAUSE
 )
 
-echo  [.] Installation des dependances ^(peut prendre 1-2 min la 1ere fois^)...
-python -m pip install -q --upgrade pip
-python -m pip install -q -r requirements.txt
+echo  [.] Installation des dependances ^(1-2 min la 1ere fois^)...
+"%VENV_PY%" -m pip install -q --upgrade pip
 if errorlevel 1 (
   color 0C
-  echo  [ERREUR] Echec pip install
+  echo  [ERREUR] Echec upgrade pip
   set "EXIT_CODE=1"
-  goto :end_pause
+  goto END_PAUSE
+)
+"%VENV_PY%" -m pip install -q -r requirements.txt
+if errorlevel 1 (
+  color 0C
+  echo  [ERREUR] Echec pip install -r requirements.txt
+  set "EXIT_CODE=1"
+  goto END_PAUSE
 )
 
 echo  [.] Installation Playwright Chromium...
-python -m playwright install chromium
+"%VENV_PY%" -m playwright install chromium
 if errorlevel 1 (
   color 0C
   echo  [ERREUR] Echec playwright install chromium
   set "EXIT_CODE=1"
-  goto :end_pause
+  goto END_PAUSE
 )
 echo  [OK] Environnement pret
 
@@ -136,64 +162,64 @@ if not exist ".env" (
     echo      Ouvrez .env, verifiez les identifiants, puis relancez LANCER.bat
     echo.
     set "EXIT_CODE=1"
-    goto :end_pause
+    goto END_PAUSE
   )
   color 0C
   echo  [ERREUR] Ni .env ni .env.example trouves.
   set "EXIT_CODE=1"
-  goto :end_pause
+  goto END_PAUSE
 )
 
 for /f "usebackq eol=# tokens=1* delims==" %%A in (".env") do (
   if not "%%A"=="" set "%%A=%%B"
 )
 
-if not "%CDP_PORT%"=="" set "CDP_URL=http://localhost:%CDP_PORT%"
-if "%CDP_URL%"=="" set "CDP_URL=http://localhost:9222"
-if "%CDP_WAIT_SECONDS%"=="" set "CDP_WAIT_SECONDS=25"
-if "%LOGIN_WAIT_SECONDS%"=="" set "LOGIN_WAIT_SECONDS=300"
-if "%USE_CDP%"=="" set "USE_CDP=true"
-if "%HEADLESS%"=="" set "HEADLESS=false"
-if not "%INDEED_LOGIN_URL%"=="" set "INDEED_HOME=%INDEED_LOGIN_URL%"
-if not "%SOFTY_LOGIN_URL%"=="" set "SOFTY_HOME=https://v2.softy.pro/stats"
+if defined CDP_PORT set "CDP_URL=http://localhost:!CDP_PORT!"
+if not defined CDP_URL set "CDP_URL=http://localhost:9222"
+if not defined CDP_WAIT_SECONDS set "CDP_WAIT_SECONDS=25"
+if not defined LOGIN_WAIT_SECONDS set "LOGIN_WAIT_SECONDS=300"
+if not defined USE_CDP set "USE_CDP=true"
+if not defined HEADLESS set "HEADLESS=false"
+if defined INDEED_LOGIN_URL set "INDEED_HOME=!INDEED_LOGIN_URL!"
+set "SOFTY_HOME=https://v2.softy.pro/stats"
 
-echo.%CHROME_USER_DATA_DIR% | findstr /B /C:"/tmp/" >nul
+echo.!CHROME_USER_DATA_DIR! | findstr /B /C:"/tmp/" >nul
 if not errorlevel 1 set "CHROME_USER_DATA_DIR="
-if "%CHROME_USER_DATA_DIR%"=="" set "CHROME_USER_DATA_DIR=%TEMP%\chrome-cdp-softyindeed"
+if not defined CHROME_USER_DATA_DIR set "CHROME_USER_DATA_DIR=%TEMP%\chrome-cdp-softyindeed"
 
 set "MAIN_ARGS="
 
-if /I not "%USE_CDP%"=="true" goto :run_python
+if /I not "!USE_CDP!"=="true" goto RUN_PYTHON
 
 echo  [.] Verification Chrome CDP...
-call :is_cdp_ready
+call :IS_CDP_READY
 if not errorlevel 1 (
   echo  [OK] Chrome CDP deja disponible
-  goto :wait_login
+  goto WAIT_LOGIN
 )
 
-if "%CHROME_APP%"=="" (
+if not defined CHROME_APP (
   color 0C
   echo  [ERREUR] Google Chrome introuvable.
   set "EXIT_CODE=1"
-  goto :end_pause
+  goto END_PAUSE
 )
 
-if not exist "%CHROME_USER_DATA_DIR%" mkdir "%CHROME_USER_DATA_DIR%"
+if not exist "!CHROME_USER_DATA_DIR!" mkdir "!CHROME_USER_DATA_DIR!"
 echo  [.] Ouverture de Chrome ^(fenetre dediee^)...
-start "" "%CHROME_APP%" --remote-debugging-port=%CDP_PORT% --user-data-dir="%CHROME_USER_DATA_DIR%" --new-window "%INDEED_HOME%" "%SOFTY_HOME%"
+start "" "!CHROME_APP!" --remote-debugging-port=!CDP_PORT! --user-data-dir="!CHROME_USER_DATA_DIR!" --new-window "!INDEED_HOME!" "!SOFTY_HOME!"
 
-call :wait_for_cdp
+call :WAIT_FOR_CDP
 if errorlevel 1 (
   color 0C
-  echo  [ERREUR] Impossible de joindre Chrome sur %CDP_URL%
+  echo  [ERREUR] Impossible de joindre Chrome sur !CDP_URL!
   echo           Fermez toutes les fenetres Chrome puis relancez.
   set "EXIT_CODE=1"
-  goto :end_pause
+  goto END_PAUSE
 )
 echo  [OK] Chrome CDP pret
 
-:wait_login
+:WAIT_LOGIN
 echo.
 echo  ============================================================
 echo   Connexion Indeed Employeur + Softy dans Chrome
@@ -201,32 +227,32 @@ echo.
 echo   Si un code 2FA apparait :
 echo     1. Validez-le dans Chrome
 echo     2. Ne fermez PAS cette fenetre noire
-echo     3. N'appuyez sur rien ici — attente automatique
+echo     3. N'appuyez sur rien ici - attente automatique
 echo  ============================================================
 echo.
 
-call :wait_for_authenticated_tabs
+call :WAIT_FOR_AUTH_TABS
 if errorlevel 1 (
   color 0C
   echo  [ERREUR] Sessions non detectees a temps.
   echo           Connectez-vous dans Chrome puis relancez LANCER.bat
   set "EXIT_CODE=1"
-  goto :end_pause
+  goto END_PAUSE
 )
 echo  [OK] Sessions Indeed et Softy detectees
 
-set "MAIN_ARGS=--cdp --cdp-url %CDP_URL%"
-if not "%INDEED_ATTACH_URL%"=="" set "MAIN_ARGS=!MAIN_ARGS! --indeed-url !INDEED_ATTACH_URL!"
-if not "%SOFTY_ATTACH_URL%"=="" set "MAIN_ARGS=!MAIN_ARGS! --softy-url !SOFTY_ATTACH_URL!"
+set "MAIN_ARGS=--cdp --cdp-url !CDP_URL!"
+if defined INDEED_ATTACH_URL set "MAIN_ARGS=!MAIN_ARGS! --indeed-url !INDEED_ATTACH_URL!"
+if defined SOFTY_ATTACH_URL set "MAIN_ARGS=!MAIN_ARGS! --softy-url !SOFTY_ATTACH_URL!"
 
-:run_python
+:RUN_PYTHON
 echo.
 echo  [.] Export Softy + Indeed + comparaison...
 echo.
-set "HEADLESS=%HEADLESS%"
+set "HEADLESS=!HEADLESS!"
 set "BATCH_UI=1"
-python main.py %MAIN_ARGS%
-set "EXIT_CODE=%ERRORLEVEL%"
+"%VENV_PY%" main.py !MAIN_ARGS!
+set "EXIT_CODE=!ERRORLEVEL!"
 
 echo.
 if exist "downloads\rapport_comparaison.txt" (
@@ -244,7 +270,7 @@ if exist "downloads\rapport_comparaison.txt" (
 )
 
 echo.
-if "%EXIT_CODE%"=="0" (
+if "!EXIT_CODE!"=="0" (
   color 0A
   echo  RESULTAT : aucune difference detectee.
 ) else if exist "downloads\rapport_comparaison.txt" (
@@ -252,33 +278,33 @@ if "%EXIT_CODE%"=="0" (
   echo  RESULTAT : des ecarts ont ete detectes ^(voir rapport^).
 ) else (
   color 0C
-  echo  RESULTAT : echec ^(code %EXIT_CODE%^).
+  echo  RESULTAT : echec ^(code !EXIT_CODE!^).
 )
 
-:end_pause
+:END_PAUSE
 echo.
 echo  Appuyez sur une touche pour fermer...
 pause >nul
-exit /b %EXIT_CODE%
+exit /b !EXIT_CODE!
 
-:is_cdp_ready
+:IS_CDP_READY
 powershell -NoProfile -ExecutionPolicy Bypass -Command "try { (Invoke-WebRequest -UseBasicParsing '%CDP_URL%/json/version' -TimeoutSec 2).StatusCode | Out-Null; exit 0 } catch { exit 1 }"
 exit /b %ERRORLEVEL%
 
-:wait_for_cdp
+:WAIT_FOR_CDP
 set /a ELAPSED=0
-:wait_cdp_loop
-call :is_cdp_ready
+:WAIT_CDP_LOOP
+call :IS_CDP_READY
 if not errorlevel 1 exit /b 0
-if !ELAPSED! GEQ %CDP_WAIT_SECONDS% exit /b 1
+if !ELAPSED! GEQ !CDP_WAIT_SECONDS! exit /b 1
 timeout /t 1 /nobreak >nul
 set /a ELAPSED+=1
-goto wait_cdp_loop
+goto WAIT_CDP_LOOP
 
-:wait_for_authenticated_tabs
+:WAIT_FOR_AUTH_TABS
 set /a ELAPSED=0
 set "WARNED=0"
-:wait_auth_loop
+:WAIT_AUTH_LOOP
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$tabs=@(); try { $tabs=Invoke-RestMethod -Uri '%CDP_URL%/json/list' -TimeoutSec 2 } catch { exit 2 }; $indeed=$tabs | Where-Object { $_.url -match 'employers\.indeed\.com' -and $_.url -notmatch 'login|account\.indeed' } | Select-Object -First 1; $softy=$tabs | Where-Object { $_.url -match 'softy\.pro' -and $_.url -notmatch 'login' } | Select-Object -First 1; if ($indeed -and $softy) { exit 0 } else { exit 1 }"
 if not errorlevel 1 exit /b 0
 if "!WARNED!"=="0" (
@@ -286,7 +312,7 @@ if "!WARNED!"=="0" (
   echo       Validez le 2FA si demande.
   set "WARNED=1"
 )
-if !ELAPSED! GEQ %LOGIN_WAIT_SECONDS% exit /b 1
+if !ELAPSED! GEQ !LOGIN_WAIT_SECONDS! exit /b 1
 timeout /t 2 /nobreak >nul
 set /a ELAPSED+=2
-goto wait_auth_loop
+goto WAIT_AUTH_LOOP
