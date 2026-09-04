@@ -50,25 +50,36 @@ if errorlevel 1 (
   echo [ERREUR] pip install
   goto END
 )
+echo     Playwright Chromium...
 "%VPY%" -m playwright install chromium
 if errorlevel 1 (
-  echo [ERREUR] playwright install
+  echo [ERREUR] playwright install chromium
   goto END
 )
+echo     Playwright Chrome channel helper...
+"%VPY%" -m playwright install chrome >nul 2>&1
 
 if not exist ".env" if exist ".env.example" copy /Y ".env.example" ".env" >nul
 
 echo [4/4] Lancement automatisation...
 echo.
-echo   Chrome va s'ouvrir.
-echo   Si 2FA : validez-le dans Chrome.
+echo   Chrome/Chromium va s'ouvrir.
+echo   Si 2FA : validez-le dans le navigateur.
 echo   Le rapport s'affichera ici a la fin.
+echo.
+echo   Ne fermez PAS cette fenetre.
 echo.
 
 "%VPY%" -u windows_run.py
 set "ERR=%ERRORLEVEL%"
 echo.
 echo Code sortie: %ERR%
+if exist "downloads\rapport_comparaison.txt" (
+  echo.
+  echo ========== RAPPORT ==========
+  type "downloads\rapport_comparaison.txt"
+  echo =============================
+)
 
 :END
 echo.

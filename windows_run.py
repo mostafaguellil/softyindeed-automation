@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.browser import DEFAULT_TIMEOUT_MS, _page_looks_authenticated, save_debug_screenshot
+from src.chrome_cdp import find_chrome_executable
 from src.compare import compare_exports, format_report
 from src.config import Settings
 from src.env_check import ensure_env_file
@@ -34,14 +35,72 @@ def _print(msg: str = "") -> None:
     print(msg, flush=True)
 
 
-def _profile_dir() -> Path:
+def _profile_dir(name: str = "softyindeed-pw-chrome") -> Path:
     env_dir = os.getenv("CHROME_USER_DATA_DIR", "").strip()
     if env_dir and not env_dir.startswith("/tmp/"):
         path = Path(env_dir)
     else:
-        path = Path(tempfile.gettempdir()) / "softyindeed-chrome-profile"
+        path = Path(tempfile.gettempdir()) / name
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _launch_browser_context(playwright, profile: Path):
+    """Try system Chrome by path, then channel, then Playwright Chromium."""
+    common = {
+        "headless": False,
+        "accept_downloads": True,
+        "viewport": {"width": 1440, "height": 900},
+        "args": [
+            "--disable-session-crashed-bubble",
+            "--no-first-run",
+            "--no-default-browser-check",
+        ],
+    }
+
+    chrome_exe = find_chrome_executable()
+    errors: list[str] = []
+
+    if chrome_exe is not None:
+        _print(f"[.] Chrome trouve : {chrome_exe}")
+        try:
+            return playwright.chromium.launch_persistent_context(
+                user_data_dir=str(profile),
+                executable_path=str(chrome_exe),
+                **common,
+            )
+        except Exception as exc:
+            errors.append(f"executable_path: {exc}")
+            _print(f"[!] Echec Chrome executable_path : {exc}")
+
+    try:
+        _print("[.] Essai channel=chrome...")
+        return playwright.chromium.launch_persistent_context(
+            user_data_dir=str(profile),
+            channel="chrome",
+            **common,
+        )
+    except Exception as exc:
+        errors.append(f"channel=chrome: {exc}")
+        _print(f"[!] Echec channel=chrome : {exc}")
+
+    chromium_profile = _profile_dir("softyindeed-pw-chromium")
+    _print("[!] Fallback Chromium Playwright...")
+    _print(f"    Profil : {chromium_profile}")
+    try:
+        return playwright.chromium.launch_persistent_context(
+            user_data_dir=str(chromium_profile),
+            **common,
+        )
+    except Exception as exc:
+        errors.append(f"chromium: {exc}")
+        _print("[ERREUR] Impossible d'ouvrir un navigateur.")
+        for line in errors:
+            _print(f"  - {line}")
+        raise RuntimeError(
+            "Aucun navigateur disponible. Installez Google Chrome, "
+            "ou relancez apres: python -m playwright install chromium"
+        ) from exc
 
 
 def _softy_home(settings: Settings) -> str:
@@ -103,25 +162,16 @@ def run() -> int:
     indeed_files: list[Path] = []
 
     with sync_playwright() as playwright:
-        _print("[.] Ouverture de Chrome...")
+        _print("[.] Ouverture du navigateur...")
         try:
-            context = playwright.chromium.launch_persistent_context(
-                user_data_dir=str(profile),
-                channel="chrome",
-                headless=False,
-                accept_downloads=True,
-                viewport={"width": 1440, "height": 900},
-                args=["--disable-session-crashed-bubble", "--no-first-run"],
-            )
+            context = _launch_browser_context(playwright, profile)
         except Exception:
-            _print("[!] Chrome systeme indisponible, fallback Chromium Playwright...")
-            context = playwright.chromium.launch_persistent_context(
-                user_data_dir=str(profile),
-                headless=False,
-                accept_downloads=True,
-                viewport={"width": 1440, "height": 900},
-            )
+            _print("")
+            _print("[ERREUR] Lancement navigateur impossible :")
+            traceback.print_exc()
+            return 1
 
+        _print("[OK] Navigateur ouvert")
         context.set_default_timeout(DEFAULT_TIMEOUT_MS)
 
         try:
@@ -167,7 +217,10 @@ def run() -> int:
                 pass
             return 1
         finally:
-            context.close()
+            try:
+                context.close()
+            except Exception:
+                pass
 
     _print("")
     _print("[.] Comparaison des exports...")

@@ -24,6 +24,12 @@ def find_chrome_executable() -> Path | None:
     system = platform.system()
     candidates: list[Path] = []
 
+    which_names = ("chrome", "chrome.exe", "google-chrome", "google-chrome-stable")
+    for name in which_names:
+        found = shutil.which(name)
+        if found:
+            candidates.append(Path(found))
+
     if system == "Darwin":
         candidates.append(Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))
     elif system == "Windows":
@@ -32,18 +38,23 @@ def find_chrome_executable() -> Path | None:
         program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
         candidates.extend(
             [
-                Path(program_files) / "Google/Chrome/Application/chrome.exe",
-                Path(program_files_x86) / "Google/Chrome/Application/chrome.exe",
-                Path(local_app) / "Google/Chrome/Application/chrome.exe",
+                Path(program_files) / "Google" / "Chrome" / "Application" / "chrome.exe",
+                Path(program_files_x86) / "Google" / "Chrome" / "Application" / "chrome.exe",
+                Path(local_app) / "Google" / "Chrome" / "Application" / "chrome.exe",
             ]
         )
     else:
         for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
             found = shutil.which(name)
             if found:
-                return Path(found)
+                candidates.append(Path(found))
 
+    seen: set[str] = set()
     for path in candidates:
+        key = str(path).lower()
+        if key in seen:
+            continue
+        seen.add(key)
         if path.exists():
             return path
     return None
