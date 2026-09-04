@@ -26,14 +26,14 @@ def ensure_env_file() -> Path:
         sys.exit(1)
 
     shutil.copy(example_path, env_path)
-    print("Fichier .env créé à partir de .env.example.")
-    print("→ Éditez .env avec vos identifiants Indeed et Softy, puis relancez.")
-    sys.exit(1)
+    print("Fichier .env créé automatiquement depuis .env.example.")
+    return env_path
 
 
 def validate_env(*, cdp_url: str | None = None) -> None:
     load_dotenv()
     ensure_env_file()
+    load_dotenv(override=True)
 
     uses_cdp = bool(cdp_url or os.getenv("CDP_URL"))
 
