@@ -111,7 +111,8 @@ def _resolve_cdp_url(args: argparse.Namespace) -> str | None:
 def _generate_exports(settings: Settings) -> tuple[list[Path], list[Path]]:
     if settings.uses_cdp_attach:
         print_cdp_instructions(settings.cdp_url or DEFAULT_CDP_URL)
-        print("Attente des onglets Indeed et Softy dans Chrome…")
+        if os.getenv("BATCH_UI", "").strip() != "1":
+            print("Attente des onglets Indeed et Softy dans Chrome…")
 
         with connect_browser_cdp(settings.cdp_url or DEFAULT_CDP_URL) as (_, _, context):
             indeed_page, softy_page = resolve_attach_pages(

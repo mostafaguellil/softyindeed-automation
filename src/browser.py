@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import time
+import os
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -136,16 +137,44 @@ def _prompt_for_page(pages: list[Page], label: str, url_hint: str | None) -> Pag
 
 
 def print_cdp_instructions(cdp_url: str) -> None:
+    if os.getenv("BATCH_UI", "").strip() == "1":
+        print(f"Connexion CDP : {cdp_url}")
+        return
+
     print("\n=== Mode Chrome attaché (CDP) ===")
-    print("1. Fermez toutes les fenêtres Chrome.")
-    print("2. Relancez Chrome avec le débogage distant :")
-    print()
-    print('   /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome \\')
-    print("     --remote-debugging-port=9222")
-    print()
-    print("3. Connectez-vous manuellement à Indeed Employeur et Softy (2FA / authenticator inclus).")
-    print("4. Le script détecte automatiquement les bons onglets et lance les exports.")
+    print("1. Une fenêtre Chrome dédiée est utilisée pour le débogage distant.")
+    print("2. Connectez-vous à Indeed Employeur et Softy (2FA inclus si demandé).")
+    print("3. Le script détecte automatiquement les onglets et lance les exports.")
     print(f"\nConnexion CDP : {cdp_url}")
+
+
+def _page_looks_authenticated(page: Page, kind: str) -> bool:
+    url = page.url.lower()
+    if kind == "indeed":
+        return "employers.indeed.com" in url and "login" not in url and "account.indeed" not in url
+    if kind == "softy":
+        return "softy.pro" in url and "login" not in url
+    return False
+
+
+def _wait_until_authenticated(page: Page, kind: str, label: str, wait_seconds: int = 300) -> None:
+    if _page_looks_authenticated(page, kind):
+        return
+
+    print(f"\n⏳ Connexion {label} requise.")
+    print("   Si un code 2FA / authenticator s'affiche dans Chrome, validez-le maintenant.")
+    print("   Attente automatique…")
+
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        if _page_looks_authenticated(page, kind):
+            print(f"✓ Session {label} détectée")
+            return
+        page.wait_for_timeout(2000)
+
+    raise RuntimeError(
+        f"Session {label} non détectée à temps. Connectez-vous dans Chrome puis relancez."
+    )
 
 
 def _find_indeed_page(pages: list[Page]) -> Page | None:
@@ -206,6 +235,8 @@ def resolve_attach_pages(
         softy_page = softy_page or _find_softy_page(pages)
 
         if indeed_page and softy_page and indeed_page != softy_page:
+            _wait_until_authenticated(indeed_page, "indeed", "Indeed")
+            _wait_until_authenticated(softy_page, "softy", "Softy")
             print(f"\n✓ Onglet Indeed détecté : {indeed_page.url}")
             print(f"✓ Onglet Softy détecté  : {softy_page.url}")
             return indeed_page, softy_page
@@ -224,8 +255,8 @@ def resolve_attach_pages(
     if softy_page is None:
         target = softy_login_url or "https://v2.softy.pro/stats"
         parsed = urlparse(target)
-        if parsed.path in ("", "/"):
-            target = f"{parsed.scheme}://{parsed.netloc}/stats"
+        if parsed.path in ("", "/") or "login" in parsed.path.lower():
+            target = f"{parsed.scheme}://{parsed.netloc}/stats" if parsed.scheme and parsed.netloc else "https://v2.softy.pro/stats"
         print(f"→ Ouverture automatique de l'onglet Softy : {target}")
         softy_page = _open_page(context, target)
 
@@ -233,6 +264,8 @@ def resolve_attach_pages(
         print("Erreur : Indeed et Softy doivent être deux onglets différents.", file=sys.stderr)
         sys.exit(1)
 
+    _wait_until_authenticated(indeed_page, "indeed", "Indeed")
+    _wait_until_authenticated(softy_page, "softy", "Softy")
     print(f"\n✓ Onglet Indeed : {indeed_page.url}")
     print(f"✓ Onglet Softy  : {softy_page.url}")
     return indeed_page, softy_page
