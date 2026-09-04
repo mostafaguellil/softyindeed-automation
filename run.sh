@@ -3,6 +3,18 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# Si lancé sous Windows (Git Bash), rediriger vers le .bat
+if [[ "${OS:-}" == "Windows_NT" ]] || uname -s 2>/dev/null | grep -qiE 'mingw|msys|cygwin'; then
+  echo ""
+  echo "=== Windows detecte ==="
+  echo "Utilisez LANCER.bat (double-clic), pas run.sh."
+  echo ""
+  if command -v cmd.exe >/dev/null 2>&1; then
+    exec cmd.exe //c LANCER.bat "$@"
+  fi
+  exit 1
+fi
+
 CDP_PORT="${CDP_PORT:-9222}"
 CDP_URL="${CDP_URL:-http://localhost:${CDP_PORT}}"
 CHROME_APP="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"

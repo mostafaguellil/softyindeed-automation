@@ -50,9 +50,11 @@ chmod +x run.sh
 
 **Windows**
 
-```bat
-run.bat
-```
+Double-cliquez sur **`LANCER.bat`** (type *Windows Batch File*).
+
+> Ne pas ouvrir `run` / `run.sh` : c’est le script **Mac/Linux**. Sous Windows, les extensions sont souvent masquées, donc les deux fichiers s’appellent « run ».
+
+Si le dossier `.venv` a été copié depuis un Mac, `LANCER.bat` le recrée automatiquement pour Windows.
 
 `run.sh` / `run.bat` lancent le **mode Chrome attaché** par défaut (2FA manuelle) :
 1. démarrent Chrome avec `--remote-debugging-port=9222` si besoin ;
