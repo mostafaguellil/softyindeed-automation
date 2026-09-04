@@ -14,6 +14,7 @@ from src.browser import (
     resolve_attach_pages,
     save_debug_screenshot,
 )
+from src.chrome_cdp import ensure_chrome_cdp
 from src.compare import compare_exports, format_report, list_export_columns
 from src.config import Settings
 from src.env_check import validate_env
@@ -111,6 +112,7 @@ def _resolve_cdp_url(args: argparse.Namespace) -> str | None:
 def _generate_exports(settings: Settings) -> tuple[list[Path], list[Path]]:
     if settings.uses_cdp_attach:
         print_cdp_instructions(settings.cdp_url or DEFAULT_CDP_URL)
+        ensure_chrome_cdp(settings)
         if os.getenv("BATCH_UI", "").strip() != "1":
             print("Attente des onglets Indeed et Softy dans Chrome…")
 
