@@ -1,10 +1,13 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-REM ASCII-only batch file (accents break Windows CMD when UTF-8)
+REM Keep the window open even if something fails (double-click safe)
+if /I not "%~1"=="__KEEP_OPEN__" (
+  cmd /k call "%~f0" __KEEP_OPEN__
+  exit /b
+)
 
 cd /d "%~dp0"
-
 title Softy / Indeed - Automatisation
 color 0B
 
@@ -17,38 +20,32 @@ echo           Exports + comparaison automatique
 echo.
 echo  ============================================================
 echo.
-echo  Lanceur Windows : LANCER.bat
-echo  (ne pas ouvrir run.sh - reserve a Mac/Linux)
+echo  Dossier : %CD%
 echo.
 
 set "EXIT_CODE=0"
 set "CDP_PORT=9222"
 set "CDP_URL=http://localhost:9222"
 set "CDP_WAIT_SECONDS=60"
-set "LOGIN_WAIT_SECONDS=300"
 set "CHROME_USER_DATA_DIR=%TEMP%\chrome-cdp-softyindeed"
 set "USE_CDP=true"
 set "HEADLESS=false"
 set "BATCH_UI=1"
 set "PYTHON_CMD="
+set "VENV_PY="
 
-echo  [.] Recherche de Python...
-
+echo  [1/5] Recherche de Python...
 where py >nul 2>&1
-if %ERRORLEVEL%==0 (
-  py -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
-  if !ERRORLEVEL!==0 (
-    set "PYTHON_CMD=py -3"
-  )
+if !ERRORLEVEL! EQU 0 (
+  py -3 -c "import sys; print(sys.version)" 2>nul
+  if !ERRORLEVEL! EQU 0 set "PYTHON_CMD=py -3"
 )
 
 if not defined PYTHON_CMD (
   where python >nul 2>&1
-  if !ERRORLEVEL!==0 (
-    python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
-    if !ERRORLEVEL!==0 (
-      set "PYTHON_CMD=python"
-    )
+  if !ERRORLEVEL! EQU 0 (
+    python -c "import sys; print(sys.version)" 2>nul
+    if !ERRORLEVEL! EQU 0 set "PYTHON_CMD=python"
   )
 )
 
@@ -56,101 +53,85 @@ if not defined PYTHON_CMD (
   color 0C
   echo.
   echo  [ERREUR] Python 3.10+ introuvable dans le PATH.
-  echo.
-  echo  Installez Python depuis https://www.python.org/downloads/
-  echo  Cochez "Add python.exe to PATH", puis relancez.
-  echo.
-  echo  Test :  py -3 --version
+  echo  Installez Python et cochez "Add python.exe to PATH".
+  echo  Testez dans cmd :  py -3 --version
   echo.
   set "EXIT_CODE=1"
-  goto END_PAUSE
+  goto FIN
 )
+echo  [OK] Python : %PYTHON_CMD%
+echo.
 
-echo  [OK] Python trouve
-call %PYTHON_CMD% --version
-if errorlevel 1 (
-  color 0C
-  echo  [ERREUR] Python ne demarre pas correctement.
-  set "EXIT_CODE=1"
-  goto END_PAUSE
-)
-
-echo  [.] Preparation de l'environnement Windows...
-
-if exist ".venv\Scripts\python.exe" goto VENV_OK
-
-if exist ".venv" (
-  echo  [!] Ancien .venv incompatible ^(souvent copie depuis Mac^).
-  echo      Recreation d'un .venv Windows...
-  rmdir /s /q ".venv" 2>nul
-)
-
-call %PYTHON_CMD% -m venv .venv
-if errorlevel 1 (
-  color 0C
-  echo  [ERREUR] Impossible de creer .venv
-  set "EXIT_CODE=1"
-  goto END_PAUSE
-)
-
-:VENV_OK
+echo  [2/5] Environnement virtuel...
 if not exist ".venv\Scripts\python.exe" (
-  color 0C
-  echo  [ERREUR] .venv\Scripts\python.exe introuvable.
-  set "EXIT_CODE=1"
-  goto END_PAUSE
+  if exist ".venv" (
+    echo  Suppression ancien .venv incompatible...
+    rmdir /s /q ".venv" 2>nul
+  )
+  echo  Creation de .venv ...
+  %PYTHON_CMD% -m venv .venv
+  if errorlevel 1 (
+    color 0C
+    echo  [ERREUR] Impossible de creer .venv
+    set "EXIT_CODE=1"
+    goto FIN
+  )
 )
 
-set "VENV_PY=%~dp0.venv\Scripts\python.exe"
+set "VENV_PY=%CD%\.venv\Scripts\python.exe"
+if not exist "%VENV_PY%" (
+  color 0C
+  echo  [ERREUR] Introuvable : %VENV_PY%
+  set "EXIT_CODE=1"
+  goto FIN
+)
+echo  [OK] %VENV_PY%
+echo.
 
+echo  [3/5] Dependances Python...
 if not exist "requirements.txt" (
   color 0C
-  echo  [ERREUR] requirements.txt introuvable dans :
-  echo           %CD%
+  echo  [ERREUR] requirements.txt manquant
   set "EXIT_CODE=1"
-  goto END_PAUSE
+  goto FIN
 )
-
-echo  [.] Installation des dependances ^(1-2 min la 1ere fois^)...
 "%VENV_PY%" -m pip install -q --upgrade pip
 if errorlevel 1 (
   color 0C
-  echo  [ERREUR] Echec upgrade pip
+  echo  [ERREUR] pip upgrade a echoue
   set "EXIT_CODE=1"
-  goto END_PAUSE
+  goto FIN
 )
 "%VENV_PY%" -m pip install -q -r requirements.txt
 if errorlevel 1 (
   color 0C
-  echo  [ERREUR] Echec pip install -r requirements.txt
+  echo  [ERREUR] pip install a echoue
   set "EXIT_CODE=1"
-  goto END_PAUSE
+  goto FIN
 )
-
-echo  [.] Installation Playwright Chromium...
 "%VENV_PY%" -m playwright install chromium
 if errorlevel 1 (
   color 0C
-  echo  [ERREUR] Echec playwright install chromium
+  echo  [ERREUR] playwright install a echoue
   set "EXIT_CODE=1"
-  goto END_PAUSE
+  goto FIN
 )
-echo  [OK] Environnement pret
+echo  [OK] Dependances installees
+echo.
 
+echo  [4/5] Fichier .env ...
 if not exist ".env" (
   if exist ".env.example" (
     copy /Y ".env.example" ".env" >nul
-    echo.
-    echo  [!] Fichier .env cree depuis .env.example
-    echo      Ouvrez .env, verifiez les identifiants, puis relancez LANCER.bat
-    echo.
+    echo  [!] .env cree depuis .env.example
+    echo      Editez .env avec vos identifiants puis relancez.
     set "EXIT_CODE=1"
-    goto END_PAUSE
+    goto FIN
   )
   color 0C
-  echo  [ERREUR] Ni .env ni .env.example trouves.
+  echo  [ERREUR] .env et .env.example absents
   set "EXIT_CODE=1"
-  goto END_PAUSE
+  goto FIN
 )
 
 for /f "usebackq eol=# tokens=1* delims==" %%A in (".env") do (
@@ -173,18 +154,18 @@ if /I "!USE_CDP!"=="true" (
   if defined INDEED_ATTACH_URL set "MAIN_ARGS=!MAIN_ARGS! --indeed-url !INDEED_ATTACH_URL!"
   if defined SOFTY_ATTACH_URL set "MAIN_ARGS=!MAIN_ARGS! --softy-url !SOFTY_ATTACH_URL!"
 )
+echo  [OK] Configuration chargee
+echo.
 
-echo.
 echo  ============================================================
-echo   Le script va :
-echo     1. Ouvrir Chrome tout seul ^(Indeed + Softy^)
-echo     2. Attendre votre 2FA si besoin
-echo     3. Exporter et comparer automatiquement
-echo     4. Afficher le rapport ici
+echo   [5/5] Automatisation
 echo.
-echo   Si un code 2FA apparait dans Chrome :
-echo     - Validez-le dans Chrome
-echo     - Ne fermez PAS cette fenetre noire
+echo   - Ouverture Chrome Indeed + Softy
+echo   - Attente 2FA si besoin ^(validez dans Chrome^)
+echo   - Exports + comparaison
+echo   - Affichage du rapport ici
+echo.
+echo   Ne fermez PAS cette fenetre.
 echo  ============================================================
 echo.
 
@@ -193,24 +174,24 @@ set "BATCH_UI=1"
 set "CDP_WAIT_SECONDS=!CDP_WAIT_SECONDS!"
 set "CHROME_USER_DATA_DIR=!CHROME_USER_DATA_DIR!"
 
-echo  [.] Lancement de l'automatisation...
-echo.
-"%VENV_PY%" main.py !MAIN_ARGS!
+"%VENV_PY%" -u main.py !MAIN_ARGS!
 set "EXIT_CODE=!ERRORLEVEL!"
 
 echo.
+echo  ============================================================
 if exist "downloads\rapport_comparaison.txt" (
-  echo  ============================================================
   echo                       RAPPORT FINAL
   echo  ============================================================
   echo.
   type "downloads\rapport_comparaison.txt"
   echo.
-  echo  ------------------------------------------------------------
-  echo   Fichier : downloads\rapport_comparaison.txt
-  echo  ------------------------------------------------------------
+  echo  Fichier : %CD%\downloads\rapport_comparaison.txt
 ) else (
-  echo  [!] Aucun rapport genere.
+  echo                       PAS DE RAPPORT
+  echo  ============================================================
+  echo.
+  echo  L'automatisation n'a pas produit de rapport.
+  echo  Regardez les messages d'erreur ci-dessus.
 )
 
 echo.
@@ -219,14 +200,16 @@ if "!EXIT_CODE!"=="0" (
   echo  RESULTAT : aucune difference detectee.
 ) else if exist "downloads\rapport_comparaison.txt" (
   color 0E
-  echo  RESULTAT : des ecarts ont ete detectes ^(voir rapport^).
+  echo  RESULTAT : des ecarts ont ete detectes.
 ) else (
   color 0C
   echo  RESULTAT : echec ^(code !EXIT_CODE!^).
 )
 
-:END_PAUSE
+:FIN
 echo.
-echo  Appuyez sur une touche pour fermer...
-pause >nul
-exit /b !EXIT_CODE!
+echo  ============================================================
+echo   Termine. La fenetre reste ouverte.
+echo   Tapez  exit  puis Entree pour fermer.
+echo  ============================================================
+echo.

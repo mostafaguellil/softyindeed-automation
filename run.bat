@@ -1,2 +1,3 @@
 @echo off
-call "%~dp0LANCER.bat" %*
+cd /d "%~dp0"
+cmd /k call "%~dp0LANCER.bat" __KEEP_OPEN__
